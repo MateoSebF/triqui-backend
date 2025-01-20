@@ -12,6 +12,7 @@ import com.triqui.backend.session.GameSession;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.ArrayList;
 
 
 public class GameWebSocketHandler extends TextWebSocketHandler {
@@ -40,6 +41,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+        String gameId = getGameIdFromSession(session);
+        GameSession gameSession = activeGames.computeIfAbsent(gameId, k-> new GameSession(new Game(), new ArrayList<>()));
+        gameSession.addSession(session);
         System.out.println("WebSocket connection established: " + session.getId());
     }
 
@@ -51,6 +55,15 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, org.springframework.web.socket.CloseStatus status) throws Exception {
+        String gameId = getGameIdFromSession(session);
+        GameSession gameSession = activeGames.get(gameId);
+        if (gameSession != null) {
+            gameSession.removeSession(session);
+            if (gameSession.getSessions().isEmpty()) {
+                activeGames.remove(gameId);
+            }
+        }
+        
         System.out.println("WebSocket connection closed: " + session.getId());
     }
 
@@ -101,5 +114,10 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
         message.append("\"currentPlayer\": \"" + game.getCurrentPlayer());
         message.append("}");
         return message.toString();
+    }
+
+    private String getGameIdFromSession(WebSocketSession session) {
+        Map<String, Object> attributes = session.getAttributes();
+        return (String) attributes.get("gameId");
     }
 }
