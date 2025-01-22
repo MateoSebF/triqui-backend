@@ -11,8 +11,6 @@ import com.triqui.backend.model.Game;
 import com.triqui.backend.session.GameSession;
 
 import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
 
 
 public class GameWebSocketHandler extends TextWebSocketHandler {
@@ -24,26 +22,47 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
         // Here you will handle messages (game moves, player turns, etc.)
         System.out.println("Received message: " + message.getPayload());
         String payloadId = message.getPayload();
-        String gameId = extractAttributeString(payloadId, "gameId");
+        // Extract gameId from URI path
+        String path = session.getUri().getPath();  // Example: /game/{gameId}
+        String gameId = path.split("/")[2];  // Split and get the gameId
         GameSession gameSession = activeGames.get(gameId);
         Game game = gameSession.getGame();
 
         if (game != null) {
+            String player = extractAttributeString(payloadId, "player");
+            if (!player.equals(game.getCurrentPlayer())) {
+                return;
+            }
             int row = Integer.parseInt(extractAttributeString(payloadId, "row"));
             int col = Integer.parseInt(extractAttributeString(payloadId, "col"));
             if (game.makeMove(row, col)){
                 broadcastGameState(gameId, gameSession);
             }
         }
-        // For now, just echo the message back to the client
-        session.sendMessage(new TextMessage("Message received: " + message.getPayload()));
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String gameId = getGameIdFromSession(session);
-        GameSession gameSession = activeGames.computeIfAbsent(gameId, k-> new GameSession(new Game(), new ArrayList<>()));
-        gameSession.addSession(session);
+        System.out.println("Received new connection");
+        // Extract gameId from URI path
+        String path = session.getUri().getPath();  // Example: /game/{gameId}
+        String gameId = path.split("/")[2];  // Split and get the gameId
+        
+        if (gameId == null) {
+            System.out.println("Missing gameId in the connection request.");
+            session.close();
+            return;
+        }
+        GameSession gameSession = activeGames.computeIfAbsent(gameId, k-> new GameSession(new Game(), new HashMap<>()));
+        String availablePlayer = gameSession.getAvailablePlayer();
+        if (availablePlayer == null) {
+            System.out.println("Game is full");
+            session.close();
+            return;
+        }
+        gameSession.addSession(session, availablePlayer);
+        activeGames.put(gameId, gameSession);
+        session.sendMessage(new TextMessage("{\"player\": \"" + availablePlayer + "\"}"));
         System.out.println("WebSocket connection established: " + session.getId());
     }
 
@@ -55,7 +74,15 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, org.springframework.web.socket.CloseStatus status) throws Exception {
-        String gameId = getGameIdFromSession(session);
+        // Extract gameId from URI path
+        String path = session.getUri().getPath();  // Example: /game/{gameId}
+        String gameId = path.split("/")[2];  // Split and get the gameId
+        if (gameId == null) {
+            System.out.println("Missing gameId in the connection request.");
+            session.close();
+            return;
+        }
+
         GameSession gameSession = activeGames.get(gameId);
         if (gameSession != null) {
             gameSession.removeSession(session);
@@ -71,6 +98,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
         payload = payload.substring(1, payload.length() - 1);
         String[] parts = payload.split(",");
         for (String part : parts) {
+            //Clear the withe spaces and quotes
+            part = part.replaceAll("\\s", "");
+            part = part.replaceAll("\"", "");
             String[] keyValue = part.split(":");
             if (keyValue[0].equals(attribute)) {
                 return keyValue[1];
@@ -82,13 +112,16 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
     private void broadcastGameState(String gameId, GameSession gameSession) {
         Game game = gameSession.getGame();
         String message = convertGameToMessage(game);
-        List<WebSocketSession> sessions = gameSession.getSessions();
+        HashMap<String, WebSocketSession> sessions = gameSession.getSessions();
 
-        for (WebSocketSession session : sessions) {
-            try {
-                session.sendMessage(new TextMessage(message));
-            } catch (IOException e) {
-                e.printStackTrace();
+        for (String player : sessions.keySet()) {
+            WebSocketSession session = sessions.get(player);
+            if (session != null) {
+                try {
+                    session.sendMessage(new TextMessage(message));
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         }
     }
@@ -111,13 +144,9 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             }
         }
         message.append("],");
-        message.append("\"currentPlayer\": \"" + game.getCurrentPlayer());
+        message.append("\"gameEnded\": " + game.isGameEnded());
         message.append("}");
         return message.toString();
     }
 
-    private String getGameIdFromSession(WebSocketSession session) {
-        Map<String, Object> attributes = session.getAttributes();
-        return (String) attributes.get("gameId");
-    }
 }
