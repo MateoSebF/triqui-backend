@@ -26,8 +26,8 @@ public class Game {
         }
     }
 
-    public boolean makeMove(int row, int col) {
-        if (gameEnded || board[row][col] != "") {
+    public boolean makeMove(String player, int row, int col) {
+        if (gameEnded || board[row][col] != "" || !player.equals(currentPlayer)) {
             return false;
         }
 
@@ -35,6 +35,29 @@ public class Game {
         checkWinner();
         switchPlayer();
         return true;
+    }
+
+    public String convertToMessage() {
+        StringBuilder message = new StringBuilder();
+        message.append("{");
+        message.append("\"board\": [");
+        for (int i = 0; i < 3; i++) {
+            message.append("[");
+            for (int j = 0; j < 3; j++) {
+                message.append("\"" + board[i][j] + "\"");
+                if (j < 2) {
+                    message.append(",");
+                }
+            }
+            message.append("]");
+            if (i < 2) {
+                message.append(",");
+            }
+        }
+        message.append("],");
+        message.append("\"gameEnded\": " + gameEnded);
+        message.append("}");
+        return message.toString();
     }
 
     private void switchPlayer() {
@@ -75,4 +98,5 @@ public class Game {
         }
         return false;
     }
+
 }
